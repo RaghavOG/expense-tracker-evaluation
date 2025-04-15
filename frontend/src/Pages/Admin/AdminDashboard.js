@@ -197,7 +197,6 @@ const AdminDashboard = () => {
                 required
               >
                 <option value="user">User</option>
-                <option value="investor">Investor</option>
                 <option value="admin">Admin</option>
               </Form.Select>
             </Form.Group>
