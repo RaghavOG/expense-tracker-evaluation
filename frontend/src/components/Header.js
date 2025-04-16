@@ -4,25 +4,37 @@ import "./style.css";
 import { useNavigate, Link } from 'react-router-dom';
 import Particles from "react-tsparticles";
 import { loadFull } from "tsparticles";
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const Header = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+
+  const toastOptions = {
+    position: "bottom-right",
+    autoClose: 2000,
+    hideProgressBar: false,
+    closeOnClick: true,
+    pauseOnHover: false,
+    draggable: true,
+    theme: "dark",
+  };
 
   // Retrieve user from local storage on mount.
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
     if (storedUser) {
       setUser(JSON.parse(storedUser));
+    } else {
+      setUser({ isGuest: true });
     }
   }, []);
 
-  // Navigate to login page if user clicks login.
   const handleShowLogin = () => {
     navigate("/login");
   };
 
-  // Logout the user.
   const handleLogout = () => {
     localStorage.removeItem("user");
     navigate("/login");
@@ -89,7 +101,22 @@ const Header = () => {
             <>
               <Nav>
                 <Nav.Link as={Link} to="/" className="text-white">Home</Nav.Link>
-                <Nav.Link as={Link} to="/stocks" className="text-white">Stocks</Nav.Link>
+
+                {/* Stocks always gated behind login */}
+                <Nav.Link
+                  className="text-white"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    if (user.isGuest) {
+                      toast.info('Please login to access stocks', toastOptions);
+                      return navigate('/login');
+                    }
+                    navigate('/stocks');
+                  }}
+                >
+                  Stocks
+                </Nav.Link>
+
                 {user.role === "admin" && (
                   <Nav.Link as={Link} to="/admin" className="text-white">Admin</Nav.Link>
                 )}

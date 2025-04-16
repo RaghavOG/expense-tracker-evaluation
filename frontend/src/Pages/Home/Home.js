@@ -2,34 +2,24 @@ import React, { useEffect, useState } from "react";
 import Header from "../../components/Header";
 import { useNavigate } from "react-router-dom";
 import { Button, Modal, Form, Container } from "react-bootstrap";
-import "./home.css";
-import { addTransactionAPI, getTransactionsAPI } from "../../utils/ApiRequest";
-import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import Spinner from "../../components/Spinner";
-import TableData from "./TableData";
+import axios from "axios";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import FormatListBulletedIcon from "@mui/icons-material/FormatListBulleted";
 import BarChartIcon from "@mui/icons-material/BarChart";
+import Spinner from "../../components/Spinner";
+import TableData from "./TableData";
 import Analytics from "./Analytics";
+import { addTransactionAPI, getTransactionsAPI } from "../../utils/ApiRequest";
+import "./home.css";
 
-const Home = () => {
+const GUEST_KEY = "guestTransactions";
+
+export default function Home() {
   const navigate = useNavigate();
-
-  const toastOptions = {
-    position: "bottom-right",
-    autoClose: 2000,
-    hideProgressBar: false,
-    closeOnClick: true,
-    pauseOnHover: false,
-    draggable: true,
-    progress: undefined,
-    theme: "dark",
-  };
-
-  const [cUser, setcUser] = useState();
+  const [cUser, setcUser] = useState(null);
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
@@ -39,35 +29,6 @@ const Home = () => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [view, setView] = useState("table");
-
-  const handleStartChange = (date) => {
-    setStartDate(date);
-  };
-
-  const handleEndChange = (date) => {
-    setEndDate(date);
-  };
-
-  const handleClose = () => setShow(false);
-  const handleShow = () => setShow(true);
-
-  useEffect(() => {
-    const avatarFunc = async () => {
-      if (localStorage.getItem("user")) {
-        const user = JSON.parse(localStorage.getItem("user"));
-        console.log(user);
-        if (user.isAvatarImageSet === false || user.avatarImage === "") {
-          navigate("/setAvatar");
-        }
-        setcUser(user);
-        setRefresh(true);
-      } else {
-        navigate("/login");
-      }
-    };
-    avatarFunc();
-  }, [navigate]);
-
   const [values, setValues] = useState({
     title: "",
     amount: "",
@@ -77,46 +38,104 @@ const Home = () => {
     transactionType: "",
   });
 
-  const handleChange = (e) => {
-    setValues({ ...values, [e.target.name]: e.target.value });
+  const toastOptions = {
+    position: "bottom-right",
+    autoClose: 2000,
+    hideProgressBar: false,
+    closeOnClick: true,
+    pauseOnHover: false,
+    draggable: true,
+    theme: "dark",
   };
 
-  const handleChangeFrequency = (e) => {
-    setFrequency(e.target.value);
+  // Helpers to load/save guest transactions
+  const loadGuest = () => {
+    try {
+      return JSON.parse(localStorage.getItem(GUEST_KEY)) || [];
+    } catch {
+      return [];
+    }
+  };
+  const saveGuest = (arr) => {
+    localStorage.setItem(GUEST_KEY, JSON.stringify(arr));
   };
 
-  const handleSetType = (e) => {
-    setType(e.target.value);
-  };
+  // on mount: load user or treat as guest
+  useEffect(() => {
+    const stored = localStorage.getItem("user");
+    if (stored) {
+      setcUser(JSON.parse(stored));
+    } else {
+      setcUser({ isGuest: true });
+      if (!localStorage.getItem(GUEST_KEY)) saveGuest([]);
+    }
+  }, []);
 
+  // load transactions (API for logged-in, localStorage for guest)
+  useEffect(() => {
+    const fetch = async () => {
+      setLoading(true);
+      if (cUser?.isGuest) {
+        setTransactions(loadGuest());
+      } else {
+        try {
+          const { data } = await axios.post(getTransactionsAPI, {
+            userId: cUser._id,
+            frequency,
+            startDate,
+            endDate,
+            type,
+          });
+          setTransactions(data.transactions);
+        } catch {
+          toast.error("Failed to load transactions", toastOptions);
+        }
+      }
+      setLoading(false);
+    };
+    if (cUser) fetch();
+  }, [cUser, frequency, startDate, endDate, type, refresh]);
+
+  const handleShow = () => setShow(true);
+  const handleClose = () => setShow(false);
+
+  // Add new transaction (guest: localStorage, user: API)
   const handleSubmit = async (e) => {
     e.preventDefault();
     const { title, amount, description, category, date, transactionType } = values;
-
     if (!title || !amount || !description || !category || !date || !transactionType) {
       toast.error("Please enter all the fields", toastOptions);
       return;
     }
     setLoading(true);
 
+    if (cUser.isGuest) {
+      const list = loadGuest();
+      const newTx = { ...values, id: Date.now() };
+      const updated = [newTx, ...list];
+      saveGuest(updated);
+      setTransactions(updated);
+      toast.success("Transaction added", toastOptions);
+      setValues({ title: "", amount: "", description: "", category: "", date: "", transactionType: "" });
+      setShow(false);
+      setLoading(false);
+      return;
+    }
+
+    // logged-in user:
     try {
       const { data } = await axios.post(addTransactionAPI, {
-        title,
-        amount,
-        description,
-        category,
-        date,
-        transactionType,
+        ...values,
         userId: cUser._id,
       });
-      if (data.success === true) {
+      if (data.success) {
         toast.success(data.message, toastOptions);
-        handleClose();
-        setRefresh(!refresh);
+        setShow(false);
+        setRefresh((p) => !p);
       } else {
         toast.error(data.message, toastOptions);
       }
-    } catch (error) {
+    } catch {
       toast.error("An error occurred. Please try again.", toastOptions);
     }
     setLoading(false);
@@ -128,45 +147,20 @@ const Home = () => {
     setEndDate(null);
     setFrequency("7");
   };
+  const handleTableClick = () => setView("table");
+  const handleChartClick = () => setView("chart");
 
-  // Fetch transactions on refresh and filter changes.
-  useEffect(() => {
-    const fetchAllTransactions = async () => {
-      try {
-        setLoading(true);
-        console.log(cUser._id, frequency, startDate, endDate, type);
-        const { data } = await axios.post(getTransactionsAPI, {
-          userId: cUser._id,
-          frequency: frequency,
-          startDate: startDate,
-          endDate: endDate,
-          type: type,
-        });
-        console.log(data);
-        setTransactions(data.transactions);
-      } catch (err) {
-        // toast.error("Error, please try again...", toastOptions);
-      } finally {
-        setLoading(false);
-      }
-    };
-    if (cUser) {
-      fetchAllTransactions();
-    }
-  }, [refresh, frequency, endDate, type, startDate, cUser]);
-
-  const handleTableClick = (e) => {
-    setView("table");
-  };
-
-  const handleChartClick = (e) => {
-    setView("chart");
-  };
-
-  // New function to navigate to Stocks page.
   const handleStocksClick = () => {
+    if (cUser?.isGuest) {
+      toast.info("Please login to view stocks", toastOptions);
+      return navigate("/login");
+    }
     navigate("/stocks");
   };
+
+  const onChange = (e) => setValues({ ...values, [e.target.name]: e.target.value });
+  const onFreqChange = (e) => setFrequency(e.target.value);
+  const onTypeChange = (e) => setType(e.target.value);
 
   return (
     <>
@@ -174,12 +168,13 @@ const Home = () => {
       {loading ? (
         <Spinner />
       ) : (
-        <Container style={{ position: "relative", zIndex: "2" }} className="mt-3">
+        <Container className="mt-3" style={{ position: "relative", zIndex: 2 }}>
           <div className="filterRow">
+            {/* Frequency */}
             <div className="text-white">
               <Form.Group className="mb-3" controlId="formSelectFrequency">
                 <Form.Label>Select Frequency</Form.Label>
-                <Form.Select name="frequency" value={frequency} onChange={handleChangeFrequency}>
+                <Form.Select name="frequency" value={frequency} onChange={onFreqChange}>
                   <option value="7">Last Week</option>
                   <option value="30">Last Month</option>
                   <option value="365">Last Year</option>
@@ -187,18 +182,18 @@ const Home = () => {
                 </Form.Select>
               </Form.Group>
             </div>
-
+            {/* Type */}
             <div className="text-white type">
               <Form.Group className="mb-3" controlId="formSelectType">
                 <Form.Label>Type</Form.Label>
-                <Form.Select name="type" value={type} onChange={handleSetType}>
+                <Form.Select name="type" value={type} onChange={onTypeChange}>
                   <option value="all">All</option>
                   <option value="expense">Expense</option>
                   <option value="credit">Earned</option>
                 </Form.Select>
               </Form.Group>
             </div>
-
+            {/* View toggle */}
             <div className="text-white iconBtnBox">
               <FormatListBulletedIcon
                 sx={{ cursor: "pointer" }}
@@ -211,7 +206,7 @@ const Home = () => {
                 className={view === "chart" ? "iconActive" : "iconDeactive"}
               />
             </div>
-
+            {/* Actions */}
             <div className="actionButtons">
               <Button onClick={handleShow} className="addNew">
                 Add New
@@ -224,140 +219,128 @@ const Home = () => {
               </Button>
               <Modal show={show} onHide={handleClose} centered>
                 <Modal.Header closeButton>
-                  <Modal.Title>Add Transaction Details</Modal.Title>
+                  <Modal.Title>Add Transaction</Modal.Title>
                 </Modal.Header>
                 <Modal.Body>
-                  <Form>
+                  <Form onSubmit={handleSubmit}>
                     <Form.Group className="mb-3" controlId="formName">
                       <Form.Label>Title</Form.Label>
                       <Form.Control
                         name="title"
                         type="text"
-                        placeholder="Enter Transaction Name"
+                        placeholder="Enter title"
                         value={values.title}
-                        onChange={handleChange}
+                        onChange={onChange}
                       />
                     </Form.Group>
-
                     <Form.Group className="mb-3" controlId="formAmount">
                       <Form.Label>Amount</Form.Label>
                       <Form.Control
                         name="amount"
                         type="number"
-                        placeholder="Enter your Amount"
+                        placeholder="Enter amount"
                         value={values.amount}
-                        onChange={handleChange}
+                        onChange={onChange}
                       />
                     </Form.Group>
-
                     <Form.Group className="mb-3" controlId="formSelect">
                       <Form.Label>Category</Form.Label>
                       <Form.Select
                         name="category"
                         value={values.category}
-                        onChange={handleChange}
+                        onChange={onChange}
                       >
                         <option value="">Choose...</option>
-                        <option value="Groceries">Groceries</option>
-                        <option value="Rent">Rent</option>
-                        <option value="Salary">Salary</option>
-                        <option value="Tip">Tip</option>
-                        <option value="Food">Food</option>
-                        <option value="Medical">Medical</option>
-                        <option value="Utilities">Utilities</option>
-                        <option value="Entertainment">Entertainment</option>
-                        <option value="Transportation">Transportation</option>
-                        <option value="Other">Other</option>
+                        <option>Groceries</option>
+                        <option>Rent</option>
+                        <option>Salary</option>
+                        <option>Tip</option>
+                        <option>Food</option>
+                        <option>Medical</option>
+                        <option>Utilities</option>
+                        <option>Entertainment</option>
+                        <option>Transportation</option>
+                        <option>Other</option>
                       </Form.Select>
                     </Form.Group>
-
                     <Form.Group className="mb-3" controlId="formDescription">
                       <Form.Label>Description</Form.Label>
                       <Form.Control
-                        type="text"
                         name="description"
-                        placeholder="Enter Description"
+                        type="text"
+                        placeholder="Enter description"
                         value={values.description}
-                        onChange={handleChange}
+                        onChange={onChange}
                       />
                     </Form.Group>
-
                     <Form.Group className="mb-3" controlId="formSelect1">
                       <Form.Label>Transaction Type</Form.Label>
                       <Form.Select
                         name="transactionType"
                         value={values.transactionType}
-                        onChange={handleChange}
+                        onChange={onChange}
                       >
                         <option value="">Choose...</option>
                         <option value="credit">Credit</option>
                         <option value="expense">Expense</option>
                       </Form.Select>
                     </Form.Group>
-
                     <Form.Group className="mb-3" controlId="formDate">
                       <Form.Label>Date</Form.Label>
                       <Form.Control
-                        type="date"
                         name="date"
+                        type="date"
                         value={values.date}
-                        onChange={handleChange}
+                        onChange={onChange}
                       />
                     </Form.Group>
+                    <Button variant="primary" type="submit" disabled={loading}>
+                      Submit
+                    </Button>
                   </Form>
                 </Modal.Body>
-                <Modal.Footer>
-                  <Button variant="secondary" onClick={handleClose}>
-                    Close
-                  </Button>
-                  <Button variant="primary" onClick={handleSubmit}>
-                    Submit
-                  </Button>
-                </Modal.Footer>
               </Modal>
             </div>
           </div>
-          <br />
+
           {frequency === "custom" && (
             <div className="date">
               <div className="form-group">
-                <label htmlFor="startDate" className="text-white">
-                  Start Date:
-                </label>
-                <div>
-                  <DatePicker
-                    selected={startDate}
-                    onChange={handleStartChange}
-                    selectsStart
-                    startDate={startDate}
-                    endDate={endDate}
-                  />
-                </div>
+                <label className="text-white">Start Date:</label>
+                <DatePicker
+                  selected={startDate}
+                  onChange={setStartDate}
+                  selectsStart
+                  startDate={startDate}
+                  endDate={endDate}
+                />
               </div>
               <div className="form-group">
-                <label htmlFor="endDate" className="text-white">
-                  End Date:
-                </label>
-                <div>
-                  <DatePicker
-                    selected={endDate}
-                    onChange={handleEndChange}
-                    selectsEnd
-                    startDate={startDate}
-                    endDate={endDate}
-                    minDate={startDate}
-                  />
-                </div>
+                <label className="text-white">End Date:</label>
+                <DatePicker
+                  selected={endDate}
+                  onChange={setEndDate}
+                  selectsEnd
+                  startDate={startDate}
+                  endDate={endDate}
+                  minDate={startDate}
+                />
               </div>
             </div>
           )}
+
           <div className="containerBtn">
             <Button variant="primary" onClick={handleReset}>
               Reset Filter
             </Button>
           </div>
+
           {view === "table" ? (
-            <TableData data={transactions} user={cUser} />
+            <TableData
+              data={transactions}
+              user={cUser}
+              refresh={() => setRefresh((p) => !p)}
+            />
           ) : (
             <Analytics transactions={transactions} user={cUser} />
           )}
@@ -366,6 +349,4 @@ const Home = () => {
       )}
     </>
   );
-};
-
-export default Home;
+}

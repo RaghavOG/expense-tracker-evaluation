@@ -40,14 +40,15 @@ const Stocks = () => {
 
   // Check if a user is logged in
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (!storedUser) {
-      navigate("/login");
-    } else {
-      setCUser(JSON.parse(storedUser));
+    const user = localStorage.getItem('user')
+      ? JSON.parse(localStorage.getItem('user'))
+      : { isGuest: true };
+    if (user.isGuest) {
+      toast.info('Please login to view or add stocks', toastOptions);
+      navigate('/login');
     }
-  }, [navigate]);
-
+  }, []);
+  
   // Fetch stocks for the current user
   useEffect(() => {
     const fetchStocks = async () => {
